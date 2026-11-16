@@ -140,8 +140,25 @@ excludes automatic database failover.
 installs a `DROP` rule on 5432, for demonstrations where the VM must stay inspectable. Only after
 fencing does the playbook promote `erp02`, flip the role files, and restart Keepalived.
 
+Powering a node off is not enough on its own: if someone boots the old primary by hand, its data
+directory is still that of a primary and its role file still says `primary`, so it would advertise
+the DB VIP next to the new primary. Two guards close that window:
+
+* The promotion writes a **fence marker** (`/srv/ha-erp/filestore/.fence/erp01`) to the shared
+  filestore — the only channel that reaches a destroyed node. Systemd drop-ins run
+  `/usr/local/sbin/ha-erp-fence-check` before PostgreSQL and before Keepalived on both ERP nodes;
+  when the marker for the local host exists, both refuse to start. The check is fail-closed if the
+  filestore is not mounted, because the node cannot then prove it is not the fenced one.
+* `db-rejoin.yml` removes the marker only after the re-clone succeeded and the role file says
+  `standby`; a failed rejoin leaves the node blocked.
+
+The check runs the marker test as uid 101 (`setpriv`) because NFS `root_squash` maps root to
+`nobody`, which cannot traverse the 0770 filestore.
+
 **Consequences.** Failover takes tens of seconds and requires an operator — this is the documented
-RTO for T06/T07, not a defect. Data loss is bounded by replication lag (RPO measured in T06).
+RTO for T06/T07, not a defect. Data loss is bounded by replication lag (RPO measured in T06). The
+fence guard deliberately couples ERP service startup to the filestore mount: losing NFS already makes
+the platform unusable, and this keeps that failure safe rather than silent.
 
 ---
 

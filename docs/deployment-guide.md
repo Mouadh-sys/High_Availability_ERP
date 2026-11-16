@@ -144,6 +144,7 @@ Note: internal snapshots of qcow2 disks are fine for this lab; remove them with
 | VIP does not move on LB failure | VRRP blocked | `tcpdump -ni virbr50 proto 112` on host; ufw rule for 112; check `unicast_peer` |
 | Odoo cannot write attachments | NFS export uid mismatch | export owned `101:101`, mount `rw`, `sudo -u '#101' touch /srv/ha-erp/filestore/x` |
 | Both ERP instances claim DB primary | role files not flipped during failover | `cat /etc/ha-erp/db-role` on both; only one may say `primary`; use `db-rejoin.yml` to fix |
+| PG/Keepalived will not start on a rebooted ERP node | fence marker from a previous failover (ADR-007) | `ls /srv/ha-erp/filestore/.fence/`; run `make db-rejoin` (it clears the marker after re-cloning) — never delete the marker by hand unless the node is known rebuilt |
 
 ## 7. Teardown / rebuild
 

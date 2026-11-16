@@ -88,6 +88,9 @@ in `streaming` state.
 ```bash
 # Hard fence (default, recommended): the VM is powered off, so it cannot write
 virsh destroy erp01
+# Create the fence marker so a hand-booted erp01 refuses to start PG/Keepalived:
+sudo setpriv --reuid=101 --regid=101 --clear-groups \
+  touch /srv/ha-erp/filestore/.fence/erp01        # run this on erp02, after fencing
 
 # Alternative when the VM must stay inspectable (postgres crashed by itself):
 $SSH debian@192.168.50.21 'sudo systemctl stop postgresql@16-main && \
@@ -117,7 +120,7 @@ $SSH debian@192.168.50.22 'ip -4 addr show | grep 192.168.50.30'
 ```
 
 If `erp01` is alive (service-mode fence), also write `standby` to its role file and restart
-Keepalived there, otherwise both nodes claim priority 180.
+Keepalived there, otherwise both nodes advertise the same VIP.
 
 ### C.5 Reconnect applications
 
@@ -155,8 +158,10 @@ make db-rejoin                                                 # -e confirm_rebo
 ```
 
 The playbook: stops the cluster and Keepalived on erp01 → wipes `/var/lib/postgresql/16/main` →
-`pg_basebackup -h 192.168.50.22 -U replicator -R -X stream` → sets `db-role=standby` → starts
-PostgreSQL and Keepalived → asserts `pg_is_in_recovery()=t` and lag < 1 s.
+`pg_basebackup -h 192.168.50.22 -U replicator -R -X stream` → sets `db-role=standby` → removes the
+fence marker from the shared filestore → starts PostgreSQL and Keepalived → asserts
+`pg_is_in_recovery()=t` and lag < 1 s. Until the marker is removed, erp01's systemd drop-in keeps
+both services from starting, so a hand-booted fenced node cannot become a second primary.
 
 Alternative (faster, requires a clean divergence): `pg_rewind --target-pgdata=... --source-server=...`,
 then recreate `standby.signal` and `primary_conninfo`. See ADR-008 for why it is not the default.

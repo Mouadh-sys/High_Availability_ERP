@@ -56,6 +56,8 @@ filestore_host_path: /srv/ha-erp/filestore
 filestore_mount: /srv/ha-erp/filestore
 filestore_uid: 101
 filestore_gid: 101
+# Fence markers written by db-failover.yml (ADR-007)
+fence_marker_dir: "{{ filestore_mount }}/.fence"
 nfs_clients: "{{ erp_hosts }}"
 
 # ---------- Keepalived / HAProxy ----------

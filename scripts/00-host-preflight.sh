@@ -70,6 +70,10 @@ else
 fi
 
 step "Existing lab state"
+if [[ -d /srv/ha-erp/filestore/.fence ]] && [[ -n "$(ls -A /srv/ha-erp/filestore/.fence 2>/dev/null)" ]]; then
+  warn "fence markers present: $(ls /srv/ha-erp/filestore/.fence | tr '\n' ' ')"
+  info "a fenced node will refuse to start PostgreSQL/Keepalived — run db-rejoin or clear them deliberately"
+fi
 for vm in "${VM_ORDER[@]}"; do
   if domain_exists "$vm"; then
     warn "$vm exists ($(domain_state "$vm")) — ./scripts/02-create-vms.sh will skip it"

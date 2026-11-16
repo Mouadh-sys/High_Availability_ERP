@@ -89,6 +89,22 @@
   hosts: erp02
   gather_facts: true
   tasks:
+    # Must happen before promotion: if the old node is ever powered on by hand,
+    # its boot guard sees this marker and refuses to start PG/Keepalived.
+    - name: Ensure the fence directory exists
+      ansible.builtin.command:
+        cmd: >-
+          setpriv --reuid={{ filestore_uid }} --regid={{ filestore_gid }} --clear-groups
+          mkdir -p {{ fence_marker_dir }}
+      changed_when: false
+
+    - name: Fence the old primary on the shared filestore
+      ansible.builtin.command:
+        cmd: >-
+          setpriv --reuid={{ filestore_uid }} --regid={{ filestore_gid }} --clear-groups
+          touch {{ fence_marker_dir }}/{{ db_primary_host }}
+      changed_when: true
+
     - name: Promote PostgreSQL
       ansible.builtin.command: "pg_ctlcluster {{ postgres_version }} {{ postgres_cluster }} promote"
       register: promote

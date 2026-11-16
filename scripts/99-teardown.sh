@@ -32,6 +32,14 @@ for name in "${VM_ORDER[@]}"; do
   ok "removed"
 done
 
+step "Fence markers"
+if [[ -d /srv/ha-erp/filestore/.fence ]]; then
+  sudo rm -f /srv/ha-erp/filestore/.fence/* 2>/dev/null || true
+  ok "cleared (a rebuilt lab must start unfenced)"
+else
+  info "no marker directory"
+fi
+
 step "Network $NET_NAME"
 if virsh net-info "$NET_NAME" >/dev/null 2>&1; then
   virsh net-destroy "$NET_NAME" >/dev/null 2>&1 || true

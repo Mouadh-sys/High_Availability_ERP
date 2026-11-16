@@ -143,7 +143,9 @@ ssh debian@192.168.50.21 'sudo systemctl start ha-erp-odoo'
 ```
 
 **Pass:** erp01 rejoins as standby (`pg_is_in_recovery()=t`, streaming, lag < 1 s), backend returns
-to `UP`, no duplicate primary, T01 smoke checks green again.
+to `UP`, no duplicate primary, T01 smoke checks green again. Before the rejoin, erp01's fence marker
+must keep PostgreSQL and Keepalived stopped — verify that a booted-but-not-rejoined erp01 has no
+`192.168.50.30` address and no postgres process; that is the split-brain guard from ADR-007.
 
 ---
 

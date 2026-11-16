@@ -15,6 +15,16 @@
     group: "{{ filestore_gid }}"
     mode: "0770"
 
+# Fence markers live here. The directory must be writable by the Odoo uid
+# because NFS root_squash maps root to nobody (see ADR-007).
+- name: Create the fence-marker directory
+  ansible.builtin.file:
+    path: "{{ filestore_host_path }}/.fence"
+    state: directory
+    owner: "{{ filestore_uid }}"
+    group: "{{ filestore_gid }}"
+    mode: "0770"
+
 - name: Export the filestore to the ERP nodes
   ansible.builtin.template:
     src: exports.j2

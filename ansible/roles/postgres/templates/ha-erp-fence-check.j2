@@ -1,0 +1,28 @@
+#!/bin/sh
+# Managed by Ansible — boot guard for PostgreSQL and Keepalived (ADR-007).
+#
+# After a failover the old primary is fenced. If an operator simply powers it
+# back on, it would come up as a *stale primary* and advertise the DB VIP while
+# the new primary is serving — split brain. The new primary therefore drops a
+# marker in the shared filestore (its only channel to a destroyed node), and
+# this check refuses to start either service while the marker exists.
+#
+# The check is also fail-closed when the filestore is not mounted: without it
+# the node cannot prove that it is not the fenced one.
+set -u
+
+if ! mountpoint -q {{ filestore_mount }}; then
+    echo "ha-erp-fence-check: {{ filestore_mount }} is not mounted; refusing to start" >&2
+    exit 1
+fi
+
+# The filestore is 0770 uid {{ filestore_uid }}; NFS root_squash means root
+# cannot traverse it, so test the marker as the Odoo uid.
+marker="{{ filestore_mount }}/.fence/{{ inventory_hostname }}"
+if setpriv --reuid={{ filestore_uid }} --regid={{ filestore_gid }} --clear-groups \
+        test -e "$marker"; then
+    echo "ha-erp-fence-check: node is fenced ($marker); run playbooks/db-rejoin.yml" >&2
+    exit 1
+fi
+
+exit 0

@@ -61,6 +61,42 @@
     group: postgres
     mode: "0600"
 
+- name: Install the boot-time fence guard
+  ansible.builtin.template:
+    src: ha-erp-fence-check.j2
+    dest: /usr/local/sbin/ha-erp-fence-check
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create the PostgreSQL drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/postgresql@{{ postgres_version }}-{{ postgres_cluster }}.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Guard the PostgreSQL unit with the fence check
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/postgresql@{{ postgres_version }}-{{ postgres_cluster }}.service.d/50-ha-erp-fence.conf
+    content: |
+      # Managed by Ansible — do not start a fenced node as primary (ADR-007)
+      [Unit]
+      RequiresMountsFor={{ filestore_mount }}
+
+      [Service]
+      ExecStartPre=/usr/local/sbin/ha-erp-fence-check
+    owner: root
+    group: root
+    mode: "0644"
+  register: pg_fence_dropin
+
+- name: Reload systemd for the PostgreSQL drop-in
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: pg_fence_dropin is changed
+
 - name: Enable and start PostgreSQL
   ansible.builtin.service:
     name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
@@ -234,6 +270,34 @@
   ansible.builtin.apt:
     name: keepalived
     state: present
+
+- name: Create the Keepalived drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/keepalived.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Guard Keepalived with the fence check
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/keepalived.service.d/50-ha-erp-fence.conf
+    content: |
+      # Managed by Ansible — a fenced node must not advertise the DB VIP (ADR-007)
+      [Unit]
+      RequiresMountsFor={{ filestore_mount }}
+
+      [Service]
+      ExecStartPre=/usr/local/sbin/ha-erp-fence-check
+    owner: root
+    group: root
+    mode: "0644"
+  register: ka_fence_dropin
+
+- name: Reload systemd for the Keepalived drop-in
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: ka_fence_dropin is changed
 
 - name: Render the database VIP configuration
   ansible.builtin.template:

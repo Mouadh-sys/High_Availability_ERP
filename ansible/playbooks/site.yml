@@ -10,8 +10,8 @@
   order: inventory
   gather_facts: true
   roles:
-    - postgres
     - nfs_client
+    - postgres
     - odoo
 
 - name: Access and load-balancing tier

@@ -153,6 +153,8 @@ Full text: [`docs/decisions.md`](docs/decisions.md).
 * `X-LB` response header identifies the LB holding the VIP; HAProxy stats show backend states.
 * `SELECT pg_is_in_recovery()` through the DB VIP flips from `t` to `f` after promotion.
 * An attachment uploaded through `erp01` is readable from `erp02`'s filestore mount.
+* A hand-booted former primary cannot become a second primary: the fence marker keeps PostgreSQL and
+  Keepalived stopped until `make db-rejoin` has rebuilt it as a standby.
 * Every test produces timestamped evidence and RTO/RPO numbers in `evidence/results.jsonl`.
 
 ---

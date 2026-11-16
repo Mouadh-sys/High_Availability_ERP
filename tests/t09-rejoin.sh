@@ -11,6 +11,13 @@ if [[ "$(virsh domstate erp01 2>/dev/null)" != "running" ]]; then
 fi
 wait_until 120 "erp01 reachable over SSH" ssh_vm "$ERP01" true || exit 1
 
+# The fence marker written at promotion must keep the stale primary stopped.
+if ssh_vm "$ERP01" 'sudo systemctl is-active --quiet postgresql@16-main'; then
+  bad "erp01 started PostgreSQL while still fenced — split-brain guard failed"
+else
+  good "erp01 booted fenced (PostgreSQL blocked by the marker)"
+fi
+
 (cd "$ROOT_DIR" && make db-rejoin) 2>&1 | tee -a "$LOG_FILE"
 rejoin_rc=${PIPESTATUS[0]}
 
