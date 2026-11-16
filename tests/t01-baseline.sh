@@ -11,10 +11,15 @@ backend_states | grep -q 'erp01=UP' && good "backend erp01 UP" || { bad "backend
 backend_states | grep -q 'erp02=UP' && good "backend erp02 UP" || { bad "backend erp02 not UP"; fail=1; }
 
 start_probe
-sleep 10
+sleep 60
 stop_probe
 avail="$(probe_availability)"
-note "availability over 10 s: ${avail}%"
+if [[ -n "$avail" ]] && awk -v a="$avail" 'BEGIN{exit !(a>=99)}'; then
+  good "availability over 60 s: ${avail}% >= 99%"
+else
+  bad "availability over 60 s: ${avail:-no samples}% < 99%"
+  fail=1
+fi
 
 # Twenty concurrent requests
 tmp="$(mktemp -d)"

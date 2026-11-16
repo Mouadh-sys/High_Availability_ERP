@@ -95,7 +95,7 @@
 | FR-07 controlled promotion | T06/T07 | pending |
 | FR-09 shared filestore | T08 | pending |
 | FR-10 automation | clean rebuild in _ min | pending |
-| NFR-01 availability ≥ 99 % | T02–T05 | pending |
+| NFR-01 availability ≥ 99 % | T01 (60 s steady state) | pending |
 | NFR-04 DB RTO ≤ 120 s | T06/T07 | pending |
 
 ## 6. Raw evidence index

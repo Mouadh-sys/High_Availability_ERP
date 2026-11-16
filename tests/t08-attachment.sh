@@ -26,8 +26,9 @@ else
 fi
 
 rel="filestore/ha_erp/${store_fname}"
+# The filestore is 0770 uid/gid 101 so only the Odoo uid can traverse it; use sudo here.
 for host in "$ERP01" "$ERP02"; do
-  if ssh_vm "$host" "test -f /srv/ha-erp/filestore/${rel}"; then
+  if ssh_vm "$host" "sudo test -f /srv/ha-erp/filestore/${rel}"; then
     good "$host sees ${rel}"
   else
     bad "$host does not see ${rel}"
@@ -36,8 +37,8 @@ for host in "$ERP01" "$ERP02"; do
 done
 
 # Same inode on both nodes proves a single shared file, not two copies.
-ino1="$(ssh_vm "$ERP01" "stat -c %i /srv/ha-erp/filestore/${rel}" 2>/dev/null | tr -d ' \n')"
-ino2="$(ssh_vm "$ERP02" "stat -c %i /srv/ha-erp/filestore/${rel}" 2>/dev/null | tr -d ' \n')"
+ino1="$(ssh_vm "$ERP01" "sudo stat -c %i /srv/ha-erp/filestore/${rel}" 2>/dev/null | tr -d ' \n')"
+ino2="$(ssh_vm "$ERP02" "sudo stat -c %i /srv/ha-erp/filestore/${rel}" 2>/dev/null | tr -d ' \n')"
 if [[ -n "$ino1" && "$ino1" == "$ino2" ]]; then
   good "same inode on both ERP nodes (${ino1})"
 else
@@ -45,7 +46,7 @@ else
   fail=1
 fi
 
-sha="$(ssh_vm "$ERP02" "sha1sum /srv/ha-erp/filestore/${rel}" 2>/dev/null | awk '{print $1}')"
+sha="$(ssh_vm "$ERP02" "sudo sha1sum /srv/ha-erp/filestore/${rel}" 2>/dev/null | awk '{print $1}')"
 if [[ "$sha" == "$checksum" ]]; then
   good "stored blob checksum matches the Odoo checksum field"
 else

@@ -6,8 +6,9 @@ streaming replication, and a shared NFS filestore.
 
 > **Project state: scaffold ready, infrastructure not yet provisioned.**
 > The repository contains the complete deployment code, configuration templates, runbooks, and
-> failure-test harness. Provisioning requires one interactive `sudo` step (see
-> [Quick start](#quick-start)); everything after that is automated.
+> failure-test harness. Provisioning needs a handful of interactive `sudo` commands (enable
+> `libvirtd` once, then the preflight/VM scripts reuse the cached credential); everything after that
+> is automated. See [Quick start](#quick-start).
 
 ---
 
@@ -73,26 +74,30 @@ failure tests, or the OOM killer — not the architecture — will decide the te
 All commands run from the repository root on the Pop!_OS host.
 
 ```bash
-# 0. One interactive privilege step (libvirt daemon, NFS export, /etc/hosts entries)
-./scripts/00-host-preflight.sh          # reports what is missing, downloads Debian 13 image
+# 0. One-time privilege step (the daemon is inactive on a fresh install)
+sudo systemctl enable --now libvirtd
 
-# 1. Virtual network (192.168.50.0/24, NAT, DHCP reservations)
+# 1. Preflight: checks tooling, RAM/disk, SSH key; downloads the Debian 13 image
+#    (prompts for sudo once; credentials are cached for the next ~15 minutes)
+./scripts/00-host-preflight.sh
+
+# 2. Virtual network (192.168.50.0/24, NAT, DHCP reservations) — no sudo needed
 ./scripts/01-create-network.sh
 
-# 2. Four VMs from the Debian 13 cloud image (cloud-init, SSH key, qemu-guest-agent)
+# 3. Four VMs from the Debian 13 cloud image (cloud-init, SSH key, qemu-guest-agent)
 ./scripts/02-create-vms.sh
 
-# 3. Configure everything with Ansible (vault password prompt)
+# 4. Configure everything with Ansible (vault password prompt)
 export ANSIBLE_VAULT_PASSWORD_FILE=~/.config/ha-erp/vault-pass
 make bootstrap      # base OS, firewall, SSH, NTP
 make site           # NFS, PostgreSQL + replication, Odoo, HAProxy, Keepalived
 
-# 4. Prove it works
+# 5. Prove it works
 make verify         # health report written to evidence/verify-<timestamp>.json
 make test           # T01–T09 failure-injection suite
 ```
 
-Prerequisites for step 3: generate the secrets file once.
+Prerequisites for step 4: generate the secrets file once.
 
 ```bash
 mkdir -p ~/.config/ha-erp

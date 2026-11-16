@@ -86,7 +86,7 @@
 
 - name: Initialise the Odoo database (primary only, one-shot container)
   ansible.builtin.command:
-    cmd: docker compose run --rm odoo odoo -i base --stop-after-init --no-http
+    cmd: docker compose run -T --rm odoo odoo -i base --stop-after-init --no-http
     chdir: "{{ odoo_dir }}"
   register: odoo_init
   changed_when: odoo_init.rc == 0

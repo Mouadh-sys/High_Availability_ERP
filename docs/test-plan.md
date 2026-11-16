@@ -22,7 +22,7 @@ user-facing endpoint continuously, and records timestamps that become RTO/availa
 | Detection time | `T_last_200_before_failure → T_first_non_200_after` (probe resolution 0.5 s) |
 | Failover time | `T_first_non_200 → T_first_200_served_by_new_owner` (owner identified by `X-LB` / stats) |
 | RTO | `T_first_200_after_restore − T_failure_injected` |
-| Availability | `successful_probes / total_probes × 100` over the test window |
+| Availability | `successful_probes / total_probes × 100` over the T01 60 s steady-state window. Failover windows (T02–T05) are reported for context: a deliberate 3–8 s outage in a 10 s window cannot mathematically reach 99 %. |
 | RPO | PostgreSQL: `pg_current_wal_lsn() − replay_lsn` at the moment of fencing; filestore: last durable write on NFS (`sync`) |
 | Replication lag | `pg_last_xact_replay_timestamp()` vs `now()` on standby, sampled every 2 s |
 | Data integrity | Row counts before/after (`res_users`, `ir_attachment`, `res_partner`), attachment checksum |
@@ -40,10 +40,10 @@ number is explainable rather than magical.
 tests/t01-baseline.sh
 ```
 
-Inject nothing for 30 s. Collect: both backends `UP`, VIP owner (`X-LB`), `pg_is_in_recovery()` on
+Inject nothing for 60 s. Collect: both backends `UP`, VIP owner (`X-LB`), `pg_is_in_recovery()` on
 both nodes, replication lag, NFS mount on both nodes, 20 parallel requests.
 
-**Pass:** 100 % probe success, two `UP` backends, lag < 1 s, 20/20 parallel requests 200.
+**Pass:** ≥ 99 % probe success over 60 s, two `UP` backends, lag < 1 s, 20/20 parallel requests 200.
 
 ---
 
@@ -53,8 +53,8 @@ both nodes, replication lag, NFS mount on both nodes, 20 parallel requests.
 ssh debian@192.168.50.21 'sudo systemctl stop ha-erp-odoo'
 ```
 
-**Expected:** backend erp01 DOWN ≤ 4 s; probe success ≥ 99 % (only in-flight requests lost);
-`X-Odoo` traffic served by erp02. **Pass:** RTO ≤ 10 s, availability ≥ 99 %.
+**Expected:** backend erp01 DOWN ≤ 4 s; only in-flight requests lost;
+`X-Odoo` traffic served by erp02. **Pass:** RTO ≤ 10 s (window availability is reported for context).
 
 **Recovery:** `systemctl start ha-erp-odoo`, wait for `UP` (rise 2), then T03.
 
@@ -62,8 +62,7 @@ ssh debian@192.168.50.21 'sudo systemctl stop ha-erp-odoo'
 
 ### T03 — Stop Odoo on erp02
 
-Same as T02 with the roles swapped. **Pass:** RTO ≤ 10 s, availability ≥ 99 %, erp01 serves 100 %
-of post-failure traffic.
+Same as T02 with the roles swapped. **Pass:** RTO ≤ 10 s; erp01 serves 100 % of post-failure traffic.
 
 ---
 
@@ -75,7 +74,7 @@ virsh destroy lb01
 
 **Expected:** VIP on lb02 ≤ 5 s, `X-LB: lb02`, no backend disruption.
 
-**Pass:** RTO ≤ 8 s, availability ≥ 99 %, `vip-transitions.log` on lb02 contains `MASTER ERP_VIP`.
+**Pass:** RTO ≤ 8 s, `vip-transitions.log` on lb02 contains `MASTER ERP_VIP`.
 
 ---
 
@@ -86,8 +85,8 @@ virsh start lb01
 # wait for ssh + haproxy, then for preemption
 ```
 
-**Pass:** VIP back on lb01 ≤ 15 s after HAProxy is healthy (priority 150 > 100), availability ≥ 99 %
-(this tests the more difficult direction: a *planned* return must not flap).
+**Pass:** VIP back on lb01 ≤ 15 s after HAProxy is healthy (priority 150 > 100), and the VIP does not
+flap (this tests the more difficult direction: a *planned* return must not interrupt service).
 
 ---
 

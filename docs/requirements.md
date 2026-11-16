@@ -26,11 +26,11 @@ Legend — **Status**: `scaffolded` (code exists, not yet executed) · `verified
 
 | ID | Requirement | Target (lab) | Verification |
 |----|-------------|--------------|--------------|
-| NFR-01 | Availability during app/LB failure | ≥ 99 % of probe requests succeed during T02–T05 | `tests/lib/probe.sh` counters |
+| NFR-01 | Availability of the ERP endpoint under normal operation | ≥ 99 % of probe requests succeed over the T01 60 s steady-state window | `tests/lib/probe.sh` counters |
 | NFR-02 | Application failover (RTO) | ≤ 10 s from process stop to all requests served by the survivor | T02, T03 (probe-derived) |
-| NFR-03 | LB failover (RTO) | ≤ 5 s (VRRP advert 1 s, 3 missed adverts) | T04 |
+| NFR-03 | LB failover (RTO) | VIP move ≤ 5 s (VRRP advert 1 s, 3 missed adverts); ≤ 8 s end-to-end HTTP RTO (0.5 s probe resolution) | T04 |
 | NFR-04 | DB failover (RTO) | ≤ 120 s including operator action and Odoo restart | T06/T07 |
-| NFR-05 | RPO | Reported as measured WAL lag at failure, not assumed zero | T06 (`pg_last_wal_receive_lsn` diff) |
+| NFR-05 | RPO | Reported as measured unreplicated WAL at failure, not assumed zero | T06 (`pg_wal_lsn_diff` sum on the primary) |
 | NFR-06 | Concurrency | 20 concurrent browser sessions without errors | T01 smoke loop |
 | NFR-07 | Recoverability | Documented, rehearsed runbooks for app, LB, DB | `docs/failover-procedures.md` |
 | NFR-08 | Maintainability | Idempotent playbooks; second `make site` reports 0 changed critical tasks | `--check`/rerun |

@@ -37,8 +37,8 @@ ssh-keygen -t ed25519 -f ~/.ssh/ha_erp_ed25519 -N '' -C ha-erp
 ```
 
 Checks: KVM access, libvirt connectivity, free RAM/disk, required binaries, SSH key, Debian 13 cloud
-image (downloads it once into `images/`). It prints the exact `sudo` commands for anything it cannot
-change itself. Expected: `[ok]` for every line, memory warning if available RAM < 6 GiB.
+image (downloads it once into `/var/lib/libvirt/images/ha-erp/`). It prints the exact `sudo` commands
+for anything it cannot change itself. Expected: `[ok]` for every line, memory warning if available RAM < 6 GiB.
 
 ## 2. Network and VMs
 

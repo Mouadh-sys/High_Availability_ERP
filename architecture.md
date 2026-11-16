@@ -95,7 +95,9 @@ flowchart TB
 
 ```
 
-![image.png](HA%20ERP/image.png)
+> Diagram: the original sketch image is not part of this repository. The maintained, text-based
+> equivalent is [`diagrams/logical-architecture.mmd`](diagrams/logical-architecture.mmd) (rendered in
+> [`docs/architecture.md`](docs/architecture.md)).
 
 # **4. Network architecture**
 
@@ -190,7 +192,8 @@ After LB01 failure:
 
 # 6. Database availability
 
-![image.png](HA%20ERP/image%201.png)
+> Diagram: the original sketch image is not part of this repository. The maintained, text-based
+> equivalent is [`diagrams/db-failover.mmd`](diagrams/db-failover.mmd).
 
 ### **Normal operation**
 
