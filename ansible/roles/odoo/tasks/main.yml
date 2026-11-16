@@ -79,6 +79,23 @@
   delay: 10
   until: odoo_pull.rc == 0
 
+- name: Read the UID/GID the image runs Odoo as
+  ansible.builtin.command:
+    cmd: docker run --rm --entrypoint id {{ odoo_image }} odoo
+  register: odoo_image_id
+  changed_when: false
+
+- name: The filestore owner must match the container UID/GID
+  ansible.builtin.assert:
+    that:
+      - "'uid=' ~ (filestore_uid | string) ~ '(' in odoo_image_id.stdout"
+      - "'gid=' ~ (filestore_gid | string) ~ '(' in odoo_image_id.stdout"
+    fail_msg: >-
+      {{ odoo_image }} runs odoo as "{{ odoo_image_id.stdout }}", but the shared filestore is owned by
+      {{ filestore_uid }}:{{ filestore_gid }}. Update filestore_uid/filestore_gid in
+      group_vars/all.yml, re-export the NFS share, and re-run the nfs_client role.
+  when: odoo_image_id.stdout is defined
+
 - name: Check whether the database has been initialised
   ansible.builtin.stat:
     path: "{{ odoo_dir }}/.initialized"
