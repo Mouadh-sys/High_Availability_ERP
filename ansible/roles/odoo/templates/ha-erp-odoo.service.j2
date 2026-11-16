@@ -1,0 +1,18 @@
+[Unit]
+Description=Odoo 17 Community (Docker Compose) — HA ERP
+Requires=docker.service
+RequiresMountsFor={{ filestore_mount }}
+After=docker.service network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ odoo_dir }}
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down --remove-orphans
+ExecReload=/usr/bin/docker compose restart odoo
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

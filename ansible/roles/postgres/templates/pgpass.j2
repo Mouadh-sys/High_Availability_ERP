@@ -1,0 +1,3 @@
+# Managed by Ansible — used by pg_basebackup and the WAL receiver
+*:5432:*:{{ postgres_replication_user }}:{{ postgres_replication_password }}
+*:5432:*:{{ odoo_db_user }}:{{ odoo_db_password }}

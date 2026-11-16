@@ -1,0 +1,10 @@
+---
+# Copy to group_vars/all/vault.yml, replace every value, then:
+#   ansible-vault encrypt group_vars/all/vault.yml
+# The file is git-ignored; this example is not secret.
+
+vault_become_password: "change-me-sudo-password-of-the-lab-user"
+vault_odoo_admin_password: "change-me-odoo-master-password"
+vault_odoo_db_password: "change-me-odoo-db-password"
+vault_replication_password: "change-me-replication-password"
+vault_keepalived_auth_pass: "change-me-vrrp-pass"

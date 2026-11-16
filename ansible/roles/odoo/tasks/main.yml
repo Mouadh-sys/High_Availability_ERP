@@ -1,0 +1,130 @@
+---
+- name: Install the Docker signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /usr/share/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker.asc] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+    filename: docker
+    state: present
+    update_cache: true
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+
+- name: Enable and start Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Create the Odoo directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ odoo_dir }}"
+    - "{{ odoo_dir }}/addons"
+
+- name: Render the Odoo configuration
+  ansible.builtin.template:
+    src: odoo.conf.j2
+    dest: "{{ odoo_dir }}/odoo.conf"
+    owner: root
+    group: "{{ filestore_gid }}"
+    mode: "0640"
+  notify: Restart Odoo
+
+- name: Render the Compose definition
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ odoo_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Odoo
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: ha-erp-odoo.service.j2
+    dest: /etc/systemd/system/ha-erp-odoo.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Odoo
+
+- name: Pull the Odoo image
+  ansible.builtin.command:
+    cmd: docker compose pull --quiet
+    chdir: "{{ odoo_dir }}"
+  changed_when: false
+  register: odoo_pull
+  retries: 3
+  delay: 10
+  until: odoo_pull.rc == 0
+
+- name: Check whether the database has been initialised
+  ansible.builtin.stat:
+    path: "{{ odoo_dir }}/.initialized"
+  register: odoo_marker
+
+- name: Initialise the Odoo database (primary only, one-shot container)
+  ansible.builtin.command:
+    cmd: docker compose run --rm odoo odoo -i base --stop-after-init --no-http
+    chdir: "{{ odoo_dir }}"
+  register: odoo_init
+  changed_when: odoo_init.rc == 0
+  when:
+    - odoo_init_db | bool
+    - not odoo_marker.stat.exists
+
+- name: Record the initialisation
+  ansible.builtin.copy:
+    content: "initialised {{ ansible_date_time.iso8601 }}\n"
+    dest: "{{ odoo_dir }}/.initialized"
+    owner: root
+    group: root
+    mode: "0644"
+  when: odoo_init is changed
+
+- name: Enable and start Odoo
+  ansible.builtin.systemd:
+    name: ha-erp-odoo
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Wait for Odoo to listen
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ odoo_http_port }}"
+    timeout: 180
+
+- name: Wait for the login page through the Odoo port
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ odoo_http_port }}/web/login"
+    status_code: 200
+  register: odoo_http
+  retries: 30
+  delay: 3
+  until: odoo_http.status | default(0) == 200
+
+- name: Report Odoo status
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: Odoo {{ odoo_image }} serving on :{{ odoo_http_port }} (db {{ odoo_db_name }} via {{ db_vip }})"

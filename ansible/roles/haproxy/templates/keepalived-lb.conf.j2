@@ -1,0 +1,44 @@
+# Managed by Ansible — ERP access VIP, identical on both load balancers
+global_defs {
+    router_id {{ inventory_hostname }}
+    script_user root
+    enable_script_security
+}
+
+vrrp_script chk_haproxy {
+    script "/usr/bin/pgrep -x haproxy"
+    interval 2
+    weight -30
+    fall 2
+    rise 2
+}
+
+vrrp_instance ERP_VIP {
+    state {{ 'MASTER' if keepalived_priority | int >= 150 else 'BACKUP' }}
+    interface {{ keepalived_vip_interface }}
+    virtual_router_id {{ keepalived_router_id }}
+    priority {{ keepalived_priority }}
+    advert_int 1
+
+    unicast_src_ip {{ ansible_default_ipv4.address }}
+    unicast_peer {
+        {{ hostvars[groups['lb'] | difference([inventory_hostname]) | first].ansible_host }}
+    }
+
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+
+    virtual_ipaddress {
+        {{ erp_vip }}/24 dev {{ keepalived_vip_interface }}
+    }
+
+    track_script {
+        chk_haproxy
+    }
+
+    notify_master "/usr/local/sbin/ha-erp-notify master ERP_VIP"
+    notify_backup "/usr/local/sbin/ha-erp-notify backup ERP_VIP"
+    notify_fault  "/usr/local/sbin/ha-erp-notify fault ERP_VIP"
+}

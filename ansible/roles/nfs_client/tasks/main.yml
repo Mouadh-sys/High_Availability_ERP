@@ -1,0 +1,35 @@
+---
+- name: Install NFS client tools
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the mount point
+  ansible.builtin.file:
+    path: "{{ filestore_mount }}"
+    state: directory
+    owner: "{{ filestore_uid }}"
+    group: "{{ filestore_gid }}"
+    mode: "0770"
+
+- name: Mount the shared filestore (and persist it in /etc/fstab)
+  ansible.posix.mount:
+    path: "{{ filestore_mount }}"
+    src: "{{ ha_erp_gateway }}:{{ filestore_host_path }}"
+    fstype: nfs
+    opts: "vers=4.2,hard,timeo=600,retrans=2,_netdev"
+    state: mounted
+
+- name: Verify the Odoo UID can write to the filestore
+  ansible.builtin.command:
+    cmd: "setpriv --reuid={{ filestore_uid }} --regid={{ filestore_gid }} --clear-groups touch {{ filestore_mount }}/.write-test"
+  register: filestore_write
+  changed_when: false
+  failed_when: filestore_write.rc != 0
+
+- name: Remove the write test file
+  ansible.builtin.file:
+    path: "{{ filestore_mount }}/.write-test"
+    state: absent

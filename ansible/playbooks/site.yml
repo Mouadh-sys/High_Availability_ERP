@@ -1,0 +1,21 @@
+---
+- name: Shared filestore on the hypervisor
+  hosts: hypervisor
+  gather_facts: true
+  roles:
+    - nfs_server
+
+- name: ERP application and database tier
+  hosts: erp
+  order: inventory
+  gather_facts: true
+  roles:
+    - postgres
+    - nfs_client
+    - odoo
+
+- name: Access and load-balancing tier
+  hosts: lb
+  gather_facts: true
+  roles:
+    - haproxy

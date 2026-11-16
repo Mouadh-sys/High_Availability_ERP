@@ -1,0 +1,162 @@
+---
+- name: Collect load-balancer state
+  hosts: lb
+  gather_facts: false
+  tasks:
+    - name: Is HAProxy running
+      ansible.builtin.command: pgrep -x haproxy
+      register: haproxy_proc
+      changed_when: false
+      failed_when: false
+
+    - name: Local addresses
+      ansible.builtin.command: ip -4 -o addr show
+      register: lb_addrs
+      changed_when: false
+
+    - name: Recent VIP transitions
+      ansible.builtin.command: tail -n 3 /var/log/ha-erp/vip-transitions.log
+      register: lb_transitions
+      changed_when: false
+      failed_when: false
+
+    - name: Record layer state
+      ansible.builtin.set_fact:
+        lb_report:
+          haproxy_running: "{{ haproxy_proc.rc == 0 }}"
+          holds_erp_vip: "{{ erp_vip in lb_addrs.stdout }}"
+          last_transitions: "{{ lb_transitions.stdout_lines | default([]) }}"
+
+- name: Collect ERP node state
+  hosts: erp
+  gather_facts: true
+  tasks:
+    - name: Odoo unit state
+      ansible.builtin.command: systemctl is-active ha-erp-odoo
+      register: odoo_unit
+      changed_when: false
+      failed_when: false
+
+    - name: Odoo container state
+      ansible.builtin.command: docker ps --filter name=odoo --format "{% raw %}{{.Status}}{% endraw %}"
+      register: odoo_container
+      changed_when: false
+      failed_when: false
+
+    - name: Local Odoo login page
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ odoo_http_port }}/web/login"
+        status_code: 200
+      register: odoo_local_http
+      failed_when: false
+
+    - name: Local addresses
+      ansible.builtin.command: ip -4 -o addr show
+      register: erp_addrs
+      changed_when: false
+
+    - name: PostgreSQL state
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: >-
+          select pg_is_in_recovery() as in_recovery,
+                 coalesce(extract(epoch from (now() - pg_last_xact_replay_timestamp()))::int, -1) as replay_lag_s
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+      register: pg_state
+      failed_when: false
+
+    - name: Filestore mount
+      ansible.builtin.command: mountpoint -q {{ filestore_mount }}
+      register: nfs_mount
+      changed_when: false
+      failed_when: false
+
+    - name: Record node state
+      ansible.builtin.set_fact:
+        erp_report:
+          odoo_unit: "{{ odoo_unit.stdout | default('unknown') }}"
+          odoo_container: "{{ odoo_container.stdout | default('') }}"
+          odoo_local_http: "{{ odoo_local_http.status | default(0) }}"
+          db: "{{ pg_state.query_result[0] | default({}) }}"
+          holds_db_vip: "{{ db_vip in erp_addrs.stdout }}"
+          filestore_mounted: "{{ nfs_mount.rc == 0 }}"
+
+- name: Verify the user-facing service and write the report
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Probe the ERP VIP
+      ansible.builtin.command: >-
+        curl -sS -o /dev/null -w '%{http_code}'
+        --max-time 5 http://{{ erp_vip }}/web/login
+      register: vip_probe
+      changed_when: false
+      failed_when: false
+      retries: 10
+      delay: 2
+      until: vip_probe.stdout == '200'
+
+    - name: Read the ERP VIP response headers
+      ansible.builtin.command: curl -sSI --max-time 5 http://{{ erp_vip }}/web/login
+      register: vip_headers
+      changed_when: false
+      failed_when: false
+
+    - name: Read HAProxy backend states
+      ansible.builtin.shell: |
+        curl -sS --max-time 5 "http://{{ erp_vip }}:{{ haproxy_stats_port }}/stats;csv" \
+          | awk -F, '$1=="be_erp" && $2!="FRONTEND" {printf "%s=%s ", $2, $18}'
+      register: backend_states
+      changed_when: false
+      failed_when: false
+
+    - name: Read the database endpoint role
+      ansible.builtin.command: >-
+        psql -h {{ db_vip }} -U {{ odoo_db_user }} -d {{ odoo_db_name }} -tAc
+        "select pg_is_in_recovery()"
+      environment:
+        PGPASSWORD: "{{ odoo_db_password }}"
+      register: db_endpoint
+      changed_when: false
+      failed_when: false
+
+    - name: Identify the active load balancer
+      ansible.builtin.set_fact:
+        active_lb: >-
+          {{ (vip_headers.stdout | lower | regex_findall('x-lb: *([a-z0-9.-]+)') | first) | default('unknown') }}
+
+    - name: Build the report
+      ansible.builtin.set_fact:
+        health_report:
+          generated_at: "{{ ansible_date_time.iso8601 }}"
+          erp_vip: "{{ erp_vip }}"
+          active_lb: "{{ active_lb }}"
+          vip_http_status: "{{ vip_probe.stdout | default('000') }}"
+          backends: "{{ backend_states.stdout | default('') | trim }}"
+          db_vip: "{{ db_vip }}"
+          db_in_recovery: "{{ db_endpoint.stdout | default('unknown') | trim }}"
+          load_balancers: "{{ groups['lb'] | map('extract', hostvars, 'lb_report') | list }}"
+          erp_nodes: "{{ groups['erp'] | map('extract', hostvars, 'erp_report') | list }}"
+
+    - name: Write evidence
+      ansible.builtin.copy:
+        content: "{{ health_report | to_nice_json }}\n"
+        dest: "{{ playbook_dir }}/../../evidence/verify-{{ lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ') }}.json"
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "ERP VIP {{ erp_vip }} → HTTP {{ health_report.vip_http_status }} (served by {{ health_report.active_lb }})"
+          - "Backends: {{ health_report.backends }}"
+          - "DB VIP {{ db_vip }} → pg_is_in_recovery = {{ health_report.db_in_recovery }}"
+
+    - name: Assert the user-facing service is healthy
+      ansible.builtin.assert:
+        that:
+          - vip_probe.stdout == '200'
+          - "'erp01=UP' in backend_states.stdout or 'erp02=UP' in backend_states.stdout"
+        fail_msg: "ERP VIP is not serving from at least one healthy backend — see the JSON report"

@@ -1,0 +1,32 @@
+%% Network topology — render with: mmdc -i diagrams/network-topology.mmd -o diagrams/network-topology.png
+flowchart LR
+    subgraph LAN["Host LAN / internet"]
+        WAN["NAT egress<br/>apt, PGDG, Docker Hub"]
+    end
+
+    subgraph HOST["Pop!_OS host"]
+        BR["virbr50<br/>192.168.50.1/24<br/>gateway · DNS · NFS"]
+        subgraph NET["ha-erp-net · NAT · DHCP 192.168.50.100-199"]
+            LB1["lb01<br/>192.168.50.11<br/>MAC 52:54:00:50:00:11"]
+            LB2["lb02<br/>192.168.50.12<br/>MAC 52:54:00:50:00:12"]
+            E1["erp01<br/>192.168.50.21<br/>MAC 52:54:00:50:00:21"]
+            E2["erp02<br/>192.168.50.22<br/>MAC 52:54:00:50:00:22"]
+            VIP(["ERP VIP .10<br/>VRID 51"])
+            DBV(["DB VIP .30<br/>VRID 52"])
+        end
+    end
+
+    WAN --- BR
+    BR --- LB1
+    BR --- LB2
+    BR --- E1
+    BR --- E2
+    VIP -.-|"vrrp unicast :112"| LB1
+    VIP -.-|"vrrp unicast :112"| LB2
+    DBV -.-|"vrrp unicast :112"| E1
+    DBV -.-|"vrrp unicast :112"| E2
+    LB1 -->|":8069"| E1
+    LB1 -->|":8069"| E2
+    LB2 -->|":8069"| E1
+    LB2 -->|":8069"| E2
+    E1 -->|":5432 via .30"| E2

@@ -1,0 +1,15 @@
+---
+# Load-balancer tier
+keepalived_router_id: 51
+
+haproxy_backends:
+  - name: erp01
+    address: "{{ erp01_ip }}"
+  - name: erp02
+    address: "{{ erp02_ip }}"
+
+firewall_rules:
+  - { port: "80",   proto: tcp,  from: "{{ admin_cidr }}", comment: "ERP HTTP via VIP" }
+  - { port: "443",  proto: tcp,  from: "{{ admin_cidr }}", comment: "ERP HTTPS via VIP" }
+  - { port: "8404", proto: tcp,  from: "{{ admin_cidr }}", comment: "HAProxy stats" }
+  - { proto: vrrp,  from: "{{ admin_cidr }}", comment: "Keepalived ERP VIP" }

@@ -1,0 +1,261 @@
+---
+- name: Install the PGDG signing key
+  ansible.builtin.get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /usr/share/keyrings/pgdg.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the PGDG apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/pgdg.asc] https://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    filename: pgdg
+    state: present
+    update_cache: true
+
+- name: Install PostgreSQL and client tooling
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-client-{{ postgres_version }}"
+      - python3-psycopg2
+    state: present
+
+- name: Ensure the cluster exists
+  ansible.builtin.command: "pg_createcluster {{ postgres_version }} {{ postgres_cluster }} --start"
+  args:
+    creates: /etc/postgresql/{{ postgres_version }}/{{ postgres_cluster }}
+
+- name: Ensure conf.d exists
+  ansible.builtin.file:
+    path: /etc/postgresql/{{ postgres_version }}/{{ postgres_cluster }}/conf.d
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0755"
+
+- name: Render tuning parameters
+  ansible.builtin.template:
+    src: 99-ha-erp.conf.j2
+    dest: /etc/postgresql/{{ postgres_version }}/{{ postgres_cluster }}/conf.d/99-ha-erp.conf
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: Restart PostgreSQL
+
+- name: Render client authentication rules
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: /etc/postgresql/{{ postgres_version }}/{{ postgres_cluster }}/pg_hba.conf
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: Restart PostgreSQL
+
+- name: Install a .pgpass for the postgres user (replication and verification)
+  ansible.builtin.template:
+    src: pgpass.j2
+    dest: /var/lib/postgresql/.pgpass
+    owner: postgres
+    group: postgres
+    mode: "0600"
+
+- name: Enable and start PostgreSQL
+  ansible.builtin.service:
+    name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+    state: started
+    enabled: true
+
+- name: Apply configuration before creating roles or cloning
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for PostgreSQL to accept local connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 5432
+    timeout: 60
+
+# ---------------------------------------------------------------------------
+# Primary only: roles, database, replication slots
+# ---------------------------------------------------------------------------
+- name: Create the ERP database role
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ odoo_db_user }}"
+    password: "{{ odoo_db_password }}"
+    role_attr_flags: LOGIN
+    state: present
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
+  when: db_role == 'primary'
+
+- name: Create the replication role
+  become_user: postgres
+  community.postgresql.postgresql_user:
+    name: "{{ postgres_replication_user }}"
+    password: "{{ postgres_replication_password }}"
+    role_attr_flags: LOGIN,REPLICATION
+    state: present
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
+  when: db_role == 'primary'
+
+- name: Create the ERP database
+  become_user: postgres
+  community.postgresql.postgresql_db:
+    name: "{{ odoo_db_name }}"
+    owner: "{{ odoo_db_user }}"
+    encoding: UTF8
+    lc_collate: C.UTF-8
+    lc_ctype: C.UTF-8
+    template: template0
+    state: present
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
+  when: db_role == 'primary'
+
+- name: Create one physical replication slot per standby
+  become_user: postgres
+  community.postgresql.postgresql_query:
+    query: >-
+      SELECT pg_create_physical_replication_slot('{{ item }}_slot')
+      WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = '{{ item }}_slot')
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
+  loop: "{{ groups['erp'] | difference([inventory_hostname]) }}"
+  when: db_role == 'primary'
+
+# ---------------------------------------------------------------------------
+# Standby only: clone from the primary
+# ---------------------------------------------------------------------------
+- name: Check whether this node is already a standby
+  ansible.builtin.stat:
+    path: "{{ postgres_data_dir }}/standby.signal"
+  register: standby_signal
+  when: db_role == 'standby'
+
+- name: Wait for the primary to accept replication connections
+  ansible.builtin.wait_for:
+    host: "{{ hostvars[db_primary_host].ansible_host }}"
+    port: 5432
+    timeout: 120
+  when:
+    - db_role == 'standby'
+    - not standby_signal.stat.exists
+
+- name: Bootstrap the standby from the primary
+  when:
+    - db_role == 'standby'
+    - not standby_signal.stat.exists or (postgres_force_rebootstrap | default(false) | bool)
+  block:
+    - name: Stop PostgreSQL for the clone
+      ansible.builtin.service:
+        name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+        state: stopped
+
+    - name: Remove the locally initialised data directory
+      ansible.builtin.file:
+        path: "{{ postgres_data_dir }}"
+        state: absent
+
+    - name: Recreate an empty data directory
+      ansible.builtin.file:
+        path: "{{ postgres_data_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0700"
+
+    - name: Clone the primary with pg_basebackup
+      ansible.builtin.command:
+        cmd: >-
+          sudo -u postgres pg_basebackup
+          -h {{ hostvars[db_primary_host].ansible_host }}
+          -D {{ postgres_data_dir }}
+          -U {{ postgres_replication_user }}
+          -S {{ postgres_standby_slot }}
+          -Fp -Xs -P -R
+      args:
+        chdir: /tmp
+      timeout: 900
+
+    - name: Start PostgreSQL as a standby
+      ansible.builtin.service:
+        name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+        state: started
+
+- name: Verify the standby is in recovery
+  become_user: postgres
+  community.postgresql.postgresql_query:
+    query: SELECT pg_is_in_recovery()
+    login_user: postgres
+    login_unix_socket: /var/run/postgresql
+  register: standby_state
+  when: db_role == 'standby'
+
+- name: Assert the standby role
+  ansible.builtin.assert:
+    that:
+      - standby_state.query_result[0].pg_is_in_recovery | bool
+    fail_msg: "erp02 is not in recovery — refusing to continue (split-brain risk)"
+  when: db_role == 'standby'
+
+# ---------------------------------------------------------------------------
+# Database VIP (Keepalived) — present on both nodes, one config
+# ---------------------------------------------------------------------------
+- name: Create the HA-ERP state directory
+  ansible.builtin.file:
+    path: /etc/ha-erp
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Record this node's database role
+  ansible.builtin.copy:
+    content: "{{ db_role }}\n"
+    dest: /etc/ha-erp/db-role
+    owner: root
+    group: root
+    mode: "0644"
+    # Do not overwrite an operator's failover decision on a later re-run.
+    force: false
+
+- name: Install the DB role check helper
+  ansible.builtin.copy:
+    src: ha-erp-db-role-check.sh
+    dest: /usr/local/sbin/ha-erp-db-role-check
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install Keepalived
+  ansible.builtin.apt:
+    name: keepalived
+    state: present
+
+- name: Render the database VIP configuration
+  ansible.builtin.template:
+    src: keepalived-db.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Keepalived
+
+- name: Enable and start Keepalived
+  ansible.builtin.service:
+    name: keepalived
+    state: started
+    enabled: true
+
+- name: Apply Keepalived configuration now
+  ansible.builtin.meta: flush_handlers
+
+- name: Confirm the database VIP answers on the primary
+  ansible.builtin.wait_for:
+    host: "{{ db_vip }}"
+    port: 5432
+    timeout: 60
+  when: db_role == 'primary'

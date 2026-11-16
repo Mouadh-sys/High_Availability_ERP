@@ -1,0 +1,45 @@
+# Managed by Ansible — database VIP, identical on both ERP nodes (ADR-006)
+global_defs {
+    router_id {{ inventory_hostname }}
+    script_user root
+    enable_script_security
+}
+
+# Positive weight: the node that holds the primary role gets +80 priority.
+vrrp_script chk_db_role {
+    script "/usr/local/sbin/ha-erp-db-role-check"
+    interval 2
+    weight 80
+    fall 2
+    rise 2
+}
+
+vrrp_instance DB_VIP {
+    state BACKUP
+    interface {{ keepalived_vip_interface }}
+    virtual_router_id 52
+    priority 100
+    advert_int 1
+
+    unicast_src_ip {{ ansible_default_ipv4.address }}
+    unicast_peer {
+        {{ hostvars[groups['erp'] | difference([inventory_hostname]) | first].ansible_host }}
+    }
+
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+
+    virtual_ipaddress {
+        {{ db_vip }}/24 dev {{ keepalived_vip_interface }}
+    }
+
+    track_script {
+        chk_db_role
+    }
+
+    notify_master "/usr/local/sbin/ha-erp-notify master DB_VIP"
+    notify_backup "/usr/local/sbin/ha-erp-notify backup DB_VIP"
+    notify_fault  "/usr/local/sbin/ha-erp-notify fault DB_VIP"
+}

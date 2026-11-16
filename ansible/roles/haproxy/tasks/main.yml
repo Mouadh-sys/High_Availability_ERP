@@ -1,0 +1,98 @@
+---
+- name: Install HAProxy, Keepalived and helpers
+  ansible.builtin.apt:
+    name:
+      - haproxy
+      - keepalived
+      - socat
+      - rsyslog
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Log HAProxy events to /var/log/haproxy.log
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/49-haproxy.conf
+    content: |
+      # Managed by Ansible
+      local0.*  /var/log/haproxy.log
+      & stop
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Create the certificate directory
+  ansible.builtin.file:
+    path: /etc/haproxy/certs
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: haproxy_tls | bool
+
+- name: Generate a self-signed certificate (optional TLS, lab only)
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -nodes -newkey rsa:2048 -days 365
+      -keyout /etc/haproxy/certs/erp.key
+      -out /etc/haproxy/certs/erp.crt
+      -subj "/CN=erp.{{ ha_erp_domain }}"
+      -addext "subjectAltName=DNS:erp.{{ ha_erp_domain }},IP:{{ erp_vip }}"
+    creates: /etc/haproxy/certs/erp.crt
+  when: haproxy_tls | bool
+
+- name: Assemble the HAProxy certificate bundle
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cat /etc/haproxy/certs/erp.crt /etc/haproxy/certs/erp.key > /etc/haproxy/certs/erp.pem
+    chmod 0600 /etc/haproxy/certs/erp.pem
+  args:
+    creates: /etc/haproxy/certs/erp.pem
+  when: haproxy_tls | bool
+
+- name: Render the HAProxy configuration
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/sbin/haproxy -c -f %s"
+  notify: Restart HAProxy
+
+- name: Render the ERP VIP configuration
+  ansible.builtin.template:
+    src: keepalived-lb.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Keepalived
+
+- name: Enable and start HAProxy
+  ansible.builtin.service:
+    name: haproxy
+    state: started
+    enabled: true
+
+- name: Enable and start Keepalived
+  ansible.builtin.service:
+    name: keepalived
+    state: started
+    enabled: true
+
+- name: Apply configuration now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the local HAProxy frontend
+  ansible.builtin.wait_for:
+    host: "{{ ansible_default_ipv4.address }}"
+    port: 80
+    timeout: 30
+
+- name: Report access-layer state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: HAProxy frontend :80 → {{ haproxy_backends | map(attribute='name') | join(', ') }},
+      VIP {{ erp_vip }} priority {{ keepalived_priority }}

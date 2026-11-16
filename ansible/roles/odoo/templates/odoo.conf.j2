@@ -1,0 +1,27 @@
+# Managed by Ansible — Odoo 17 Community, HA-ERP lab
+[options]
+admin_passwd = {{ odoo_admin_password }}
+
+db_host = {{ db_vip }}
+db_port = 5432
+db_user = {{ odoo_db_user }}
+db_password = {{ odoo_db_password }}
+db_name = {{ odoo_db_name }}
+dbfilter = ^{{ odoo_db_name }}$
+db_maxconn = 20
+
+addons_path = /mnt/extra-addons,/usr/lib/python3/dist-packages/odoo/addons
+data_dir = /var/lib/odoo
+
+proxy_mode = True
+workers = {{ odoo_workers }}
+max_cron_threads = {{ odoo_max_cron_threads }}
+limit_memory_soft = {{ odoo_memory_soft }}
+limit_memory_hard = {{ odoo_memory_hard }}
+limit_time_cpu = {{ odoo_limit_time_cpu }}
+limit_time_real = {{ odoo_limit_time_real }}
+
+list_db = {{ 'True' if odoo_list_db | bool else 'False' }}
+http_interface = 0.0.0.0
+http_port = {{ odoo_http_port }}
+log_level = info

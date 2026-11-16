@@ -1,0 +1,6 @@
+---
+- name: Bootstrap the load balancers and ERP nodes
+  hosts: lb:erp
+  gather_facts: true
+  roles:
+    - common

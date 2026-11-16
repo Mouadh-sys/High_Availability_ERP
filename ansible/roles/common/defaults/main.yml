@@ -1,0 +1,29 @@
+---
+base_packages:
+  - curl
+  - ca-certificates
+  - jq
+  - socat
+  - tcpdump
+  - vim-tiny
+  - htop
+  - gnupg
+  - apt-transport-https
+  - python3-psycopg2
+  - ufw
+  - rsyslog
+  - unattended-upgrades
+  - systemd-timesyncd
+
+common_hosts_entries:
+  - { ip: "192.168.50.1",  names: "host.ha-erp.lab host" }
+  - { ip: "192.168.50.10", names: "erp.ha-erp.lab erp" }
+  - { ip: "192.168.50.11", names: "lb01.ha-erp.lab lb01" }
+  - { ip: "192.168.50.12", names: "lb02.ha-erp.lab lb02" }
+  - { ip: "192.168.50.21", names: "erp01.ha-erp.lab erp01" }
+  - { ip: "192.168.50.22", names: "erp02.ha-erp.lab erp02" }
+
+common_sysctl:
+  vm.swappiness: "10"
+  net.core.somaxconn: "1024"
+  net.ipv4.tcp_keepalive_time: "300"

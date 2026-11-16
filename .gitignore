@@ -1,0 +1,29 @@
+# Secrets — never commit
+ansible/group_vars/all/vault.yml
+tests/.env
+*.pem
+*.key
+!**/files/*.pub
+
+# Ansible artifacts
+*.retry
+ansible/.ansible/
+ansible/collections/
+.ansible-lint
+
+# Generated / large artifacts
+evidence/*
+!evidence/.gitkeep
+!evidence/results.jsonl
+images/
+*.qcow2
+*.iso
+*.log
+
+# Python / editor
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+*.swp

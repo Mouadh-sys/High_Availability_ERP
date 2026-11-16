@@ -1,0 +1,5 @@
+---
+odoo_memory_soft: 700000000
+odoo_memory_hard: 900000000
+odoo_limit_time_cpu: 600
+odoo_limit_time_real: 1200

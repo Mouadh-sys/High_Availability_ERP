@@ -1,0 +1,9 @@
+# Collections used by the playbooks. All are available in the system Ansible install
+# on the lab host; this file documents the dependency and allows reproduction elsewhere.
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0"
+  - name: community.general
+    version: ">=8.0.0"
+  - name: community.postgresql
+    version: ">=3.0.0"

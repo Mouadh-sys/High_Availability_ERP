@@ -1,0 +1,17 @@
+# Managed by Ansible — lab access policy (SR-03)
+# TYPE  DATABASE        USER                ADDRESS                 METHOD
+local   all             postgres                                    peer
+local   all             all                                         peer
+host    all             all                 127.0.0.1/32            scram-sha-256
+host    all             all                 ::1/128                 scram-sha-256
+
+# Odoo: only the ERP nodes and the hypervisor (verification queries)
+{% for ip in erp_hosts %}
+host    all             {{ odoo_db_user }}  {{ ip }}/32              scram-sha-256
+{% endfor %}
+host    all             {{ odoo_db_user }}  {{ ha_erp_gateway }}/32  scram-sha-256
+
+# Streaming replication: only the ERP peers
+{% for ip in erp_hosts %}
+host    replication     {{ postgres_replication_user }}  {{ ip }}/32  scram-sha-256
+{% endfor %}

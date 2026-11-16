@@ -1,0 +1,40 @@
+%% Logical architecture — render with: mmdc -i diagrams/logical-architecture.mmd -o diagrams/logical-architecture.png
+flowchart TB
+    U["ERP user<br/>browser"]
+
+    subgraph HOST["Physical host — Pop!_OS 24.04 · 8 threads · 15 GiB RAM"]
+        direction TB
+        subgraph VIRT["KVM / QEMU / libvirt — ha-erp-net 192.168.50.0/24"]
+            direction TB
+            VIP(["ERP VIP<br/>192.168.50.10"])
+
+            subgraph ACCESS["Access layer"]
+                LB1["lb01<br/>HAProxy + Keepalived<br/>MASTER · priority 150"]
+                LB2["lb02<br/>HAProxy + Keepalived<br/>BACKUP · priority 100"]
+            end
+
+            subgraph APPDB["Application + database layer"]
+                E1["erp01<br/>Odoo 17 · workers 2<br/>PostgreSQL 16 primary"]
+                E2["erp02<br/>Odoo 17 · workers 2<br/>PostgreSQL 16 standby"]
+            end
+
+            DBV(["DB VIP<br/>192.168.50.30"])
+        end
+
+        NFS[("NFS export<br/>/srv/ha-erp/filestore")]
+        BK[("Backups<br/>/srv/ha-erp/backups")]
+    end
+
+    U -->|"HTTP :80"| VIP
+    VIP --> LB1
+    VIP -. "failover ≤ 5 s" .-> LB2
+    LB1 -->|":8069"| E1
+    LB1 -->|":8069"| E2
+    LB2 -->|":8069"| E1
+    LB2 -->|":8069"| E2
+    E1 <-->|"WAL streaming :5432"| E2
+    E1 -->|":5432"| DBV
+    E2 -->|":5432"| DBV
+    E1 ---|":2049"| NFS
+    E2 ---|":2049"| NFS
+    NFS -.->|"nightly pg_dump + tar"| BK

@@ -1,0 +1,27 @@
+%% Controlled database failover — render with: mmdc -i diagrams/db-failover.mmd -o diagrams/db-failover.png
+sequenceDiagram
+    autonumber
+    actor Op as Operator
+    participant Host as Hypervisor
+    participant O1 as erp01<br/>PG primary + Odoo
+    participant O2 as erp02<br/>PG standby + Odoo
+    participant VIP as DB VIP .30
+    participant LB as HAProxy / erp users
+
+    Op->>O1: T0 stop PostgreSQL (or crash)
+    LB->>LB: /web/login fails → both backends DOWN (DB dependency)
+    Host->>O1: fence: virsh destroy erp01
+    Host-->>Op: fencing confirmed
+    Op->>O2: check replay LSN / lag, confirm role=standby
+    Op->>O2: pg_ctlcluster 16 main promote
+    O2-->>Op: pg_is_in_recovery() = false
+    Op->>O2: write /etc/ha-erp/db-role = primary
+    Op->>O2: systemctl restart keepalived
+    O2->>VIP: VRRP priority 180 → MASTER
+    VIP-->>O2: gratuitous ARP, VIP moves
+    Op->>O2: docker compose restart odoo (drop stale connections)
+    LB->>O2: health checks pass → backend UP
+    Note over LB: T_restore = first 200 from VIP<br/>RTO = T_restore − T0<br/>RPO = WAL not yet replayed at T0
+    Op->>Host: later: virsh start erp01
+    Op->>O1: db-rejoin.yml → pg_basebackup from erp02, role=standby
+    O1-->>O2: streaming resumes, lag → 0

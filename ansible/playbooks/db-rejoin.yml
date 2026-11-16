@@ -1,0 +1,147 @@
+---
+# Rebuild a former primary as a streaming standby.
+# Usage: ansible-playbook playbooks/db-rejoin.yml -e confirm_rebootstrap=yes
+# The source of truth after a failover is db_standby_host (erp02 in the inventory naming).
+- name: Safety gate
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Refuse to run without explicit confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm_rebootstrap | default('no') == 'yes'
+        fail_msg: >-
+          Pass -e confirm_rebootstrap=yes. This stops PostgreSQL on erp01, deletes
+          its data directory, and re-clones it from erp02.
+
+- name: Wait for the former primary to boot
+  hosts: erp01
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+
+- name: Prepare the replication source
+  hosts: erp02
+  gather_facts: false
+  tasks:
+    - name: Ensure the slot for erp01 exists
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: >-
+          SELECT pg_create_physical_replication_slot('erp01_slot')
+          WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots
+                            WHERE slot_name = 'erp01_slot')
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+
+- name: Rebuild erp01 as a standby
+  hosts: erp01
+  gather_facts: true
+  tasks:
+    - name: Stop Keepalived
+      ansible.builtin.service:
+        name: keepalived
+        state: stopped
+
+    - name: Stop PostgreSQL
+      ansible.builtin.service:
+        name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+        state: stopped
+
+    - name: Delete the diverged data directory
+      ansible.builtin.file:
+        path: "{{ postgres_data_dir }}"
+        state: absent
+
+    - name: Recreate an empty data directory
+      ansible.builtin.file:
+        path: "{{ postgres_data_dir }}"
+        state: directory
+        owner: postgres
+        group: postgres
+        mode: "0700"
+
+    - name: Re-clone from the new primary
+      ansible.builtin.command:
+        cmd: >-
+          sudo -u postgres pg_basebackup
+          -h {{ hostvars[db_standby_host].ansible_host }}
+          -D {{ postgres_data_dir }}
+          -U {{ postgres_replication_user }}
+          -S {{ postgres_standby_slot }}
+          -Fp -Xs -P -R
+      args:
+        chdir: /tmp
+      timeout: 900
+
+    - name: Record the standby role
+      ansible.builtin.copy:
+        content: "standby\n"
+        dest: /etc/ha-erp/db-role
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Start PostgreSQL
+      ansible.builtin.service:
+        name: "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+        state: started
+
+    - name: Wait for the standby to accept connections
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 5432
+        timeout: 60
+
+    - name: Verify recovery
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: select pg_is_in_recovery() as in_recovery
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+      register: rejoin_state
+
+    - name: The node must be a standby
+      ansible.builtin.assert:
+        that:
+          - rejoin_state.query_result[0].in_recovery | bool
+        fail_msg: "erp01 did not come back as a standby — do not start Keepalived."
+
+    - name: Start Keepalived as a standby (priority 100, no DB VIP)
+      ansible.builtin.service:
+        name: keepalived
+        state: started
+
+    - name: Restart Odoo so it reconnects through the database VIP
+      ansible.builtin.systemd:
+        name: ha-erp-odoo
+        state: restarted
+
+- name: Verify streaming replication
+  hosts: erp02
+  gather_facts: false
+  tasks:
+    - name: Wait for a streaming standby
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: >-
+          select client_addr, state, sent_lsn, replay_lsn,
+                 pg_wal_lsn_diff(sent_lsn, replay_lsn) as bytes_behind
+          from pg_stat_replication
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+      register: repl
+      retries: 30
+      delay: 2
+      until:
+        - repl.query_result | length > 0
+        - repl.query_result[0].state == 'streaming'
+
+    - name: Replication state
+      ansible.builtin.debug:
+        msg: >-
+          {{ repl.query_result[0].client_addr }} is {{ repl.query_result[0].state }},
+          {{ repl.query_result[0].bytes_behind }} bytes behind

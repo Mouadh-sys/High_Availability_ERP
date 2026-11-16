@@ -1,0 +1,13 @@
+---
+# Application and database tier
+
+# Only the primary creates the Odoo database and initialises base modules.
+odoo_init_db: "{{ inventory_hostname == db_primary_host }}"
+
+firewall_rules:
+  - { port: "8069", proto: tcp, from: "{{ lb01_ip }}", comment: "Odoo backend from lb01" }
+  - { port: "8069", proto: tcp, from: "{{ lb02_ip }}", comment: "Odoo backend from lb02" }
+  - { port: "5432", proto: tcp, from: "{{ erp01_ip }}", comment: "PostgreSQL from erp01" }
+  - { port: "5432", proto: tcp, from: "{{ erp02_ip }}", comment: "PostgreSQL from erp02" }
+  - { port: "5432", proto: tcp, from: "{{ ha_erp_gateway }}", comment: "PostgreSQL verification from host" }
+  - { proto: vrrp,  from: "{{ admin_cidr }}", comment: "Keepalived DB VIP" }

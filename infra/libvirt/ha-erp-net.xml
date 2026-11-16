@@ -1,0 +1,27 @@
+<network>
+  <name>ha-erp-net</name>
+  <!-- NAT keeps the lab isolated from the LAN while allowing package downloads. -->
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr50' stp='on' delay='0'/>
+  <mtu size='1500'/>
+  <domain name='ha-erp.lab' localOnly='yes'/>
+  <ip address='192.168.50.1' netmask='255.255.255.0'>
+    <dhcp>
+      <!-- VIPs .10 and .30 are deliberately outside the range. -->
+      <range start='192.168.50.100' end='192.168.50.199'/>
+      <!-- Deterministic addressing: MAC -> fixed lease (ADR-005). -->
+      <host mac='52:54:00:50:00:11' name='lb01'  ip='192.168.50.11'/>
+      <host mac='52:54:00:50:00:12' name='lb02'  ip='192.168.50.12'/>
+      <host mac='52:54:00:50:00:21' name='erp01' ip='192.168.50.21'/>
+      <host mac='52:54:00:50:00:22' name='erp02' ip='192.168.50.22'/>
+    </dhcp>
+  </ip>
+  <dns>
+    <forwarder addr='1.1.1.1'/>
+    <forwarder addr='9.9.9.9'/>
+  </dns>
+</network>

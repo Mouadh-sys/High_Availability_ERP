@@ -1,0 +1,115 @@
+---
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
+
+- name: Ensure time synchronisation is running
+  ansible.builtin.service:
+    name: systemd-timesyncd
+    state: started
+    enabled: true
+
+- name: Apply kernel tuning
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/90-ha-erp.conf
+    state: present
+    reload: true
+  loop: "{{ common_sysctl | dict2items }}"
+
+- name: Add lab name resolution entries
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^{{ item.ip }}\s'
+    line: "{{ item.ip }}\t{{ item.names }}"
+    state: present
+  loop: "{{ common_hosts_entries }}"
+
+- name: Create HA-ERP log directory
+  ansible.builtin.file:
+    path: /var/log/ha-erp
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install VIP transition logger
+  ansible.builtin.copy:
+    src: ha-erp-notify.sh
+    dest: /usr/local/sbin/ha-erp-notify
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Harden SSH
+  ansible.builtin.template:
+    src: 99-ha-erp-ssh.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-ha-erp.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart ssh
+
+- name: Configure unattended upgrades
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable unattended upgrades
+  ansible.builtin.service:
+    name: unattended-upgrades
+    state: started
+    enabled: true
+
+# --- firewall -------------------------------------------------------------
+# Rules are staged before the default deny policy is applied, so SSH is never
+# cut off by enabling ufw mid-play.
+- name: Allow SSH administration
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    from_ip: "{{ admin_cidr }}"
+    comment: "SSH administration"
+  when: manage_firewall | bool
+
+- name: Allow service ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    from_ip: "{{ item.from | default(admin_cidr) }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ firewall_rules | default([]) }}"
+  when: manage_firewall | bool
+
+- name: Set default inbound policy
+  community.general.ufw:
+    policy: deny
+    direction: incoming
+  when: manage_firewall | bool
+
+- name: Set default outbound policy
+  community.general.ufw:
+    policy: allow
+    direction: outgoing
+  when: manage_firewall | bool
+
+- name: Enable firewall
+  community.general.ufw:
+    state: enabled
+  when: manage_firewall | bool

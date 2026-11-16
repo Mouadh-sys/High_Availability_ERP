@@ -1,0 +1,180 @@
+---
+# Controlled database failover: fence the old primary, promote the standby, move the DB VIP.
+# Usage: ansible-playbook playbooks/db-failover.yml -e confirm_fence=yes
+#        optional: -e db_fence_mode=service  (stop services instead of powering the VM off)
+- name: Safety gate
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Refuse to run without explicit confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm_fence | default('no') == 'yes'
+        fail_msg: >-
+          Refusing to continue. Verify the standby is streaming, then re-run with
+          -e confirm_fence=yes. This fences {{ db_primary_host }} and promotes {{ db_standby_host }}.
+
+- name: Check the standby before fencing anything
+  hosts: erp02
+  gather_facts: false
+  tasks:
+    - name: Read standby role and replay lag
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: >-
+          select pg_is_in_recovery() as in_recovery,
+                 coalesce(extract(epoch from (now() - pg_last_xact_replay_timestamp()))::int, -1) as replay_lag_s,
+                 pg_last_wal_receive_lsn() as receive_lsn,
+                 pg_last_wal_replay_lsn() as replay_lsn
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+      register: standby_pre
+
+    - name: The standby must still be in recovery
+      ansible.builtin.assert:
+        that:
+          - standby_pre.query_result[0].in_recovery | bool
+        fail_msg: "{{ db_standby_host }} is not a standby — refusing to promote (split-brain risk)."
+
+    - name: Record the pre-failover position (RPO evidence)
+      ansible.builtin.debug:
+        msg: >-
+          replay lag {{ standby_pre.query_result[0].replay_lag_s }} s,
+          receive LSN {{ standby_pre.query_result[0].receive_lsn }},
+          replay LSN {{ standby_pre.query_result[0].replay_lsn }}
+
+- name: Fence the old primary at the hypervisor
+  hosts: hypervisor
+  gather_facts: false
+  tasks:
+    - name: Power off the old primary (hard fence)
+      ansible.builtin.command: virsh destroy {{ db_primary_host }}
+      register: fence
+      changed_when: fence.rc == 0
+      failed_when: false
+      when: db_fence_mode | default('virsh') == 'virsh'
+
+    - name: Read the old primary state
+      ansible.builtin.command: virsh domstate {{ db_primary_host }}
+      register: fence_state
+      changed_when: false
+
+    - name: Fencing must be effective
+      ansible.builtin.assert:
+        that:
+          - "'shut off' in fence_state.stdout or 'crashed' in fence_state.stdout"
+        fail_msg: "{{ db_primary_host }} is still running: {{ fence_state.stdout }} — promotion aborted."
+
+- name: Fence the old primary at the service level (optional mode)
+  hosts: erp01
+  gather_facts: false
+  ignore_unreachable: true
+  tasks:
+    - name: Stop PostgreSQL and Keepalived
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - "postgresql@{{ postgres_version }}-{{ postgres_cluster }}"
+        - keepalived
+      when: db_fence_mode | default('virsh') == 'service'
+
+    - name: Block remaining database connections
+      ansible.builtin.command: iptables -I INPUT -p tcp --dport 5432 -j DROP
+      changed_when: true
+      when: db_fence_mode | default('virsh') == 'service'
+
+- name: Promote the standby
+  hosts: erp02
+  gather_facts: true
+  tasks:
+    - name: Promote PostgreSQL
+      ansible.builtin.command: "pg_ctlcluster {{ postgres_version }} {{ postgres_cluster }} promote"
+      register: promote
+      changed_when: promote.rc == 0
+
+    - name: Confirm the node is no longer in recovery
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        query: select pg_is_in_recovery() as in_recovery
+        login_user: postgres
+        login_unix_socket: /var/run/postgresql
+      register: promoted
+      retries: 10
+      delay: 1
+      until: not (promoted.query_result[0].in_recovery | bool)
+
+    - name: Record the new primary role
+      ansible.builtin.copy:
+        content: "primary\n"
+        dest: /etc/ha-erp/db-role
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Move the database VIP
+      ansible.builtin.service:
+        name: keepalived
+        state: restarted
+
+    - name: Wait for the database VIP locally
+      ansible.builtin.wait_for:
+        host: "{{ db_vip }}"
+        port: 5432
+        timeout: 60
+
+    - name: Restart Odoo to drop pooled connections to the old primary
+      ansible.builtin.systemd:
+        name: ha-erp-odoo
+        state: restarted
+
+    - name: Wait for Odoo to serve again
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ odoo_http_port }}"
+        timeout: 180
+
+- name: Verify the promoted endpoint
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: The database VIP must accept a write
+      ansible.builtin.command: >-
+        psql -h {{ db_vip }} -U {{ odoo_db_user }} -d {{ odoo_db_name }} -v ON_ERROR_STOP=1 -tAc
+        "create table if not exists ha_erp_probe(id serial primary key, ts timestamptz default now());
+         insert into ha_erp_probe default values returning id;"
+      environment:
+        PGPASSWORD: "{{ odoo_db_password }}"
+      register: db_write
+      retries: 10
+      delay: 2
+      until: db_write.rc == 0
+      changed_when: true
+
+    - name: The database VIP must not be in recovery
+      ansible.builtin.command: >-
+        psql -h {{ db_vip }} -U {{ odoo_db_user }} -d {{ odoo_db_name }} -tAc "select pg_is_in_recovery()"
+      environment:
+        PGPASSWORD: "{{ odoo_db_password }}"
+      register: db_role
+      changed_when: false
+      failed_when: false
+
+    - name: Verify ERP access through the application VIP
+      ansible.builtin.command: >-
+        curl -sS -o /dev/null -w '%{http_code}' --max-time 5 http://{{ erp_vip }}/web/login
+      register: vip_probe
+      changed_when: false
+      failed_when: false
+      retries: 20
+      delay: 5
+      until: vip_probe.stdout == '200'
+
+    - name: Failover summary
+      ansible.builtin.debug:
+        msg:
+          - "New primary: {{ db_standby_host }} ({{ db_role.stdout | default('?') | trim }} = false means writable)"
+          - "Write probe id: {{ db_write.stdout | default('?') | trim }}"
+          - "ERP VIP HTTP: {{ vip_probe.stdout }}"

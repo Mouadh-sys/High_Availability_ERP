@@ -1,0 +1,69 @@
+---
+# Shared topology and service settings. Secrets live in group_vars/all/vault.yml.
+ha_erp_domain: ha-erp.lab
+ha_erp_subnet: 192.168.50.0/24
+ha_erp_gateway: 192.168.50.1
+admin_cidr: 192.168.50.0/24
+
+erp_vip: 192.168.50.10
+db_vip: 192.168.50.30
+
+erp01_ip: 192.168.50.21
+erp02_ip: 192.168.50.22
+lb01_ip: 192.168.50.11
+lb02_ip: 192.168.50.12
+erp_hosts:
+  - "{{ erp01_ip }}"
+  - "{{ erp02_ip }}"
+
+# Database topology (used by playbooks that run from the hypervisor too)
+db_primary_host: erp01
+db_standby_host: erp02
+db_fence_mode: virsh
+
+timezone: Africa/Tunis
+
+# ---------- Odoo ----------
+odoo_image: odoo:17.0
+odoo_dir: /opt/ha-erp/odoo
+odoo_http_port: 8069
+odoo_db_name: ha_erp
+odoo_db_user: odoo
+odoo_workers: 2
+odoo_max_cron_threads: 1
+odoo_list_db: false
+odoo_admin_password: "{{ vault_odoo_admin_password }}"
+odoo_db_password: "{{ vault_odoo_db_password }}"
+
+# ---------- PostgreSQL ----------
+postgres_version: 16
+postgres_cluster: main
+postgres_data_dir: /var/lib/postgresql/{{ postgres_version }}/{{ postgres_cluster }}
+postgres_shared_buffers: 192MB
+postgres_effective_cache_size: 512MB
+postgres_work_mem: 4MB
+postgres_max_connections: 100
+postgres_wal_keep_size: 1GB
+postgres_replication_user: replicator
+postgres_replication_password: "{{ vault_replication_password }}"
+postgres_standby_slot: "{{ inventory_hostname }}_slot"
+
+# ---------- Shared storage ----------
+filestore_host_path: /srv/ha-erp/filestore
+filestore_mount: /srv/ha-erp/filestore
+filestore_uid: 101
+filestore_gid: 101
+nfs_clients: "{{ erp_hosts }}"
+
+# ---------- Keepalived / HAProxy ----------
+keepalived_vip_interface: "{{ ansible_default_ipv4.interface | default('ens3') }}"
+keepalived_auth_pass: "{{ vault_keepalived_auth_pass }}"
+haproxy_stats_port: 8404
+haproxy_tls: false
+haproxy_balance: roundrobin
+haproxy_check_interval: 2s
+haproxy_check_fall: 2
+haproxy_check_rise: 2
+
+# ---------- Firewall ----------
+manage_firewall: true

@@ -1,0 +1,60 @@
+# Managed by Ansible — HAProxy access tier for the HA ERP lab
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+    maxconn 4096
+    nbthread 1
+
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    option  forwardfor
+    option  http-server-close
+    option  redispatch
+    retries 3
+    timeout connect      5s
+    timeout client       30s
+    timeout server       30s
+    timeout http-request 10s
+    timeout http-keep-alive 5s
+    timeout check        3s
+
+frontend fe_erp
+    bind *:80
+{% if haproxy_tls | bool %}
+    bind *:443 ssl crt /etc/haproxy/certs/erp.pem
+    http-request redirect scheme https unless { ssl_fc }
+    http-request set-header X-Forwarded-Proto https
+{% else %}
+    http-request set-header X-Forwarded-Proto http
+{% endif %}
+    # Identifies which load balancer served the request (test evidence).
+    http-response set-header X-LB {{ inventory_hostname }}
+    default_backend be_erp
+
+backend be_erp
+    balance {{ haproxy_balance }}
+    option httpchk GET /web/login
+    http-check expect status 200
+    http-reuse safe
+    cookie SERVERID insert indirect nocache
+{% for server in haproxy_backends %}
+    server {{ server.name }} {{ server.address }}:{{ odoo_http_port }} check cookie {{ server.name }} inter {{ haproxy_check_interval }} fall {{ haproxy_check_fall }} rise {{ haproxy_check_rise }} maxconn 100
+{% endfor %}
+
+listen stats
+    bind *:{{ haproxy_stats_port }}
+    mode http
+    stats enable
+    stats uri /stats
+    stats refresh 5s
+    stats show-legends
+    stats show-node

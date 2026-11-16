@@ -1,0 +1,20 @@
+# Managed by Ansible — one Odoo worker container per ERP node.
+# Host networking keeps ports, source addresses and Keepalived identical to a
+# native deployment; the filestore is the shared NFS mount.
+services:
+  odoo:
+    image: {{ odoo_image }}
+    container_name: odoo
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - {{ filestore_mount }}:/var/lib/odoo
+      - {{ odoo_dir }}/odoo.conf:/etc/odoo/odoo.conf:ro
+      - {{ odoo_dir }}/addons:/mnt/extra-addons
+    environment:
+      TZ: {{ timezone }}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
