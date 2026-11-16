@@ -41,8 +41,9 @@ shared through the filestore). If the container restarts in a loop, inspect
 
 **Trigger.** `lb01` powered off, HAProxy killed, or the VM hangs.
 
-**Detection.** `chk_haproxy` (`pgrep -x haproxy`, weight −30) drops lb01 to priority 120; a full VM
-loss drops it to 0. lb02 (100) takes over after ~3 × `advert_int` = 3 s.
+**Detection.** `chk_haproxy` (`pgrep -x haproxy`, weight 0 = binary mode) puts lb01 in FAULT; a full
+VM loss stops its adverts. Either way lb02 (priority 100) takes over after ~3 × `advert_int` = 3 s,
+or after 2 failed script checks (4 s) when only HAProxy died.
 
 **Verification.**
 

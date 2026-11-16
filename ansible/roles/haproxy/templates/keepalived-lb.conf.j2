@@ -5,10 +5,11 @@ global_defs {
     enable_script_security
 }
 
+# weight 0 (default) = binary mode: a failing script puts the instance in FAULT,
+# so a node whose haproxy is down never holds the VIP — even if its peer is gone.
 vrrp_script chk_haproxy {
     script "/usr/bin/pgrep -x haproxy"
     interval 2
-    weight -30
     fall 2
     rise 2
 }

@@ -52,8 +52,8 @@ for administration and for TLS certificate subject alternative names.
 
 | Instance | VRID | Peers | Base priority | Track script |
 |----------|------|-------|---------------|--------------|
-| `ERP_VIP` | 51 | lb01 ⇄ lb02 | 150 / 100 | `chk_haproxy` (weight −30, interval 2 s) |
-| `DB_VIP` | 52 | erp01 ⇄ erp02 | 100 / 100 | `chk_db_role` (weight +80, interval 2 s) |
+| `ERP_VIP` | 51 | lb01 ⇄ lb02 | 150 / 100 | `chk_haproxy` (weight 0 = FAULT on failure, interval 2 s) |
+| `DB_VIP` | 52 | erp01 ⇄ erp02 | 100 / 100 | `chk_db_role` (weight 0 = FAULT, `init_fail`, interval 2 s) |
 
 Both instances use **unicast** VRRP (`unicast_src_ip` / `unicast_peer`) with `advert_int 1`,
 `auth_type PASS`. Authentication is a lab control, not a security boundary; the password comes from

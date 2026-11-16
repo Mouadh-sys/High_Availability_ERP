@@ -5,13 +5,16 @@ global_defs {
     enable_script_security
 }
 
-# Positive weight: the node that holds the primary role gets +80 priority.
+# weight 0 (default) = binary mode: a failing script puts the instance in FAULT
+# and releases the VIP. That is what makes the VIP a *role* indicator: a standby
+# never advertises for it, even when the primary is unreachable (no split brain).
+# init_fail closes the boot window before the first check has run.
 vrrp_script chk_db_role {
     script "/usr/local/sbin/ha-erp-db-role-check"
     interval 2
-    weight 80
     fall 2
     rise 2
+    init_fail
 }
 
 vrrp_instance DB_VIP {

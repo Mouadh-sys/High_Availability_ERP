@@ -99,18 +99,25 @@ Recreating a VM with the same MAC preserves its address. Documented as "determin
 
 ---
 
-## ADR-006 — Database VIP ownership driven by a role file and weighted VRRP script
+## ADR-006 — Database VIP ownership driven by a role file and binary-mode VRRP script
 
-**Status:** locked · 16 Nov 2026
+**Status:** locked · 16 Nov 2026 (revised: weight 0, `init_fail`)
 
 **Context.** The DB VIP must follow the *current primary*, which changes during a controlled
 failover. Keepalived priorities are normally static per node, and a plain "is PostgreSQL running?"
 check is true on the standby as well.
 
-**Decision.** Both ERP nodes run the same Keepalived configuration: base priority 100, and a
-`vrrp_script` that exits 0 when `/etc/ha-erp/db-role` contains `primary`, carrying `weight 80`.
-Promotion writes `primary` on the new node (and `standby` on the old one if it is alive) and restarts
-Keepalived. The node claiming the primary role therefore holds `192.168.50.30`.
+**Decision.** Both ERP nodes run the same Keepalived configuration: base priority 100 and a
+`vrrp_script` that exits 0 only when `/etc/ha-erp/db-role` contains `primary`. The script keeps the
+**default weight 0**, which is binary mode: failure moves the instance to FAULT and releases the VIP.
+`init_fail` makes the script "failed" until its first success, so a booting standby cannot grab the
+VIP before the role is read. Promotion writes `primary` on the new node (and `standby` on the old one
+if alive); the node whose script succeeds holds `192.168.50.30`.
+
+**Why not a positive weight.** An earlier draft used `weight 80`. That only adjusts priority: with
+the primary gone, the surviving standby (80 vs nothing) would still be elected and would advertise a
+VIP for a read-only database — the exact split-brain outcome this design forbids. Binary/FAULT mode
+means "not primary ⇒ no VIP", independent of whether the peer is reachable.
 
 **Consequences.** One config, no per-node priority edits, and VIP movement is an explicit,
 auditable action (`notify_master` logs every transition). A stale role file is the main failure mode

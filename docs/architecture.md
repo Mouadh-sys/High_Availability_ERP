@@ -21,7 +21,7 @@ harnesses inject failures and record timings.
 | Access | Keepalived on lb01/lb02 | Owns `192.168.50.10`, fails over in ~3 s | VRRP unicast, priorities 150/100, `chk_haproxy` |
 | Application | Odoo 17 container on erp01/erp02 | Serve ERP, mount NFS filestore, talk to DB VIP | Two identical instances, HAProxy pool |
 | Database | PostgreSQL 16 on erp01/erp02 | ERP data, WAL streaming | Async streaming replication + controlled promotion |
-| Database endpoint | Keepalived on erp01/erp02 | Owns `192.168.50.30` and follows the primary role | Role file + weighted `vrrp_script` (ADR-006) |
+| Database endpoint | Keepalived on erp01/erp02 | Owns `192.168.50.30` and follows the primary role | Role file + binary-mode `vrrp_script` (ADR-006) |
 | Storage | NFS server on the host | Shared filestore `/srv/ha-erp/filestore` | None (documented SPOF) |
 | Automation | Ansible | Idempotent provisioning | Roles + templates, vault for secrets |
 

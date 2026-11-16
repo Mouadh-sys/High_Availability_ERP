@@ -138,7 +138,7 @@ ansible-vault encrypt ansible/group_vars/all/vault.yml
 | ADR-003 | PostgreSQL **16** from PGDG, native on the guests | Streaming replication, `pg_basebackup`, VIP and fencing stay simple; DB never runs in a container |
 | ADR-004 | **Unicast** VRRP | libvirt NAT bridges do not reliably forward VRRP multicast |
 | ADR-005 | Deterministic addressing via libvirt DHCP reservations | Equivalent to static for this lab, no guest-side network config drift |
-| ADR-006 | DB VIP follows role via weighted `vrrp_script` | One static Keepalived config on both nodes; promotion = flip `/etc/ha-erp/db-role` |
+| ADR-006 | DB VIP follows role via a binary-mode `vrrp_script` (weight 0 ⇒ FAULT) | One static Keepalived config on both nodes; a standby releases the VIP instead of advertising it for a read-only DB |
 | ADR-007 | Controlled failover; hard fence by `virsh destroy` (default) | Prevents split-brain; automatic promotion is explicitly out of scope |
 | ADR-008 | Re-bootstrap standby with `pg_basebackup` instead of `pg_rewind` | Simpler, reproducible, acceptable data volume for the lab |
 | ADR-009 | Health checks on `GET /web/login` | Odoo 17 has no dedicated health endpoint; `/web/login` exercises the DB |
