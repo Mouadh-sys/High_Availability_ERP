@@ -111,6 +111,23 @@
     - odoo_init_db | bool
     - not odoo_marker.stat.exists
 
+# Odoo creates `admin` with the well-known default password. Replace it with the
+# vault value using the shell (no HTTP), and commit explicitly.
+- name: Enforce the Odoo admin login password
+  ansible.builtin.command:
+    cmd: >-
+      docker compose run -T --rm odoo
+      odoo shell --shell-interface=python --no-http -d {{ odoo_db_name }}
+    chdir: "{{ odoo_dir }}"
+    stdin: |
+      env.ref('base.user_admin').write({'password': {{ odoo_admin_user_password | to_json }}})
+      env.cr.commit()
+  register: odoo_admin_set
+  changed_when: odoo_admin_set.rc == 0
+  no_log: true
+  timeout: 180
+  when: odoo_init is changed
+
 - name: Record the initialisation
   ansible.builtin.copy:
     content: "initialised {{ ansible_date_time.iso8601 }}\n"

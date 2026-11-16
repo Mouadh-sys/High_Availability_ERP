@@ -30,6 +30,17 @@ Create the SSH key the VMs will trust (the preflight script does this if missing
 ssh-keygen -t ed25519 -f ~/.ssh/ha_erp_ed25519 -N '' -C ha-erp
 ```
 
+The vault keys and where they are used:
+
+| Vault key | Used for |
+|-----------|----------|
+| `vault_become_password` | `sudo` on the hypervisor (Ansible `become` for the NFS role) |
+| `vault_odoo_master_password` | Odoo `admin_passwd` (database manager), never used as a login |
+| `vault_odoo_admin_password` | `admin` **login** password, enforced after `-i base`; also copied into `tests/.env` as `ODOO_ADMIN_PASSWORD` |
+| `vault_odoo_db_password` | PostgreSQL role `odoo`, read by Odoo over the DB VIP |
+| `vault_replication_password` | PostgreSQL role `replicator` (streaming replication, `pg_basebackup`) |
+| `vault_keepalived_auth_pass` | VRRP authentication for both Keepalived instances |
+
 ## 1. Preflight
 
 ```bash
@@ -101,8 +112,9 @@ virsh net-dhcp-leases ha-erp-net
 ## 5. Smoke test before failure testing
 
 ```bash
-make verify                       # writes evidence/verify-<ts>.json
-make test-fast                    # T01–T03
+cp tests/.env.example tests/.env     # fill in ODOO_DB_PASSWORD and ODOO_ADMIN_PASSWORD
+make verify                          # writes evidence/verify-<ts>.json
+make test-fast                       # T01–T03
 ```
 
 Snapshots (recommended before destructive tests):

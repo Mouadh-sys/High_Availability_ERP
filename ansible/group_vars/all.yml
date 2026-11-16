@@ -32,7 +32,10 @@ odoo_db_user: odoo
 odoo_workers: 2
 odoo_max_cron_threads: 1
 odoo_list_db: false
-odoo_admin_password: "{{ vault_odoo_admin_password }}"
+# Database master password (Odoo's admin_passwd, used by the DB manager).
+odoo_master_password: "{{ vault_odoo_master_password }}"
+# Password of the `admin` login created by `-i base`; enforced after initialisation.
+odoo_admin_user_password: "{{ vault_odoo_admin_password }}"
 odoo_db_password: "{{ vault_odoo_db_password }}"
 
 # ---------- PostgreSQL ----------

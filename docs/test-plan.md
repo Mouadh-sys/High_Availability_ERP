@@ -127,7 +127,8 @@ ODOO_ADMIN_PASSWORD=... tests/t08-attachment.sh
 
 The script authenticates over XML-RPC, creates an `ir.attachment` with a random payload, then:
 1. reads the attachment back through the ERP VIP,
-2. locates the file under `/srv/ha-erp/filestore/ha_erp/filestore/` on **erp02**,
+2. locates the file under `/srv/ha-erp/filestore/filestore/ha_erp/` on **erp02**
+   (the NFS export is Odoo's `data_dir`; Odoo appends `filestore/<db>`),
 3. verifies the SHA-256 of the stored blob.
 
 **Pass:** identical checksum on erp01 and erp02, attachment downloadable through the VIP.
@@ -159,7 +160,7 @@ T06 if `t05` did not restore lb01.
 ## 5. Safety
 
 * Snapshot or `virsh destroy` only — never delete volumes during a test.
-* `tests/.env` holds the Odoo admin password for T08; it is git-ignored.
+* `tests/.env` holds the Odoo `admin` login password for T08; it is git-ignored.
 * Abort conditions: two primaries detected, NFS mount lost on both nodes, host available memory
   below 500 MB. The harness prints the abort reason and leaves the lab in a fenced state for manual
   recovery rather than guessing.
