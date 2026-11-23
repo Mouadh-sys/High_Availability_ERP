@@ -55,7 +55,11 @@ if [[ -f "$BASE_IMAGE" ]]; then
 else
   info "downloading Debian 13 genericcloud image (~350 MB)"
   sudo install -d -m 0770 -o "$USER" -g kvm "$IMAGES_DIR"
-  curl -fL --retry 3 --progress-bar -o "${BASE_IMAGE}.part" "$IMAGE_URL"
+  if ! curl -4 -fL --retry 5 --retry-all-errors --retry-delay 5 \
+    --connect-timeout 20 --progress-bar -o "${BASE_IMAGE}.part" "$IMAGE_URL"; then
+    rm -f "${BASE_IMAGE}.part"
+    die "could not download base image from $IMAGE_URL; check host connectivity and re-run ./scripts/00-host-preflight.sh"
+  fi
   mv "${BASE_IMAGE}.part" "$BASE_IMAGE"
   ok "downloaded to $BASE_IMAGE"
 fi
